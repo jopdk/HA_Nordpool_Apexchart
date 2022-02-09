@@ -10,7 +10,7 @@ The sensor.yaml includes more sensors than i used, but i might use them later :-
 ![image](https://user-images.githubusercontent.com/59705799/153181840-a0c8d3ef-5737-454a-80ca-386f2c039e50.png)
 
 I do not use the sensor "Total Electricity Power", because i get the wattage directly from the main meter.
-But the "Total Electricity Power" is the total of all the powersensors, you might have in you home.
+But the "Total Electricity Power" is the total of all the powersensors, you might have in you home, so add these if you cant provide the overall wattage used.
 
 ```yaml
     # Total Energy measure which is needed for the lovelace graphs, here, you need to of course adjust to your needs (which sensors you are using, if you are using any)
