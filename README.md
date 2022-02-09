@@ -7,6 +7,18 @@ apexcharts-card_last3days.yaml:
 
 
 The sensor.yaml includes more sensors than i used, but i might use them later :-)
-![image](https://user-images.githubusercontent.com/59705799/153181303-533987b0-0bf4-434b-84a5-480d4126617d.png)
+![image](https://user-images.githubusercontent.com/59705799/153181840-a0c8d3ef-5737-454a-80ca-386f2c039e50.png)
+
+I do not use the sensor "Total Electricity Power", because i get the wattage directly from the main meter.
+But the "Total Electricity Power" is the total of all the powersensors, you might have in you home.
+
+```ruby
+    # Total Energy measure which is needed for the lovelace graphs, here, you need to of course adjust to your needs (which sensors you are using, if you are using any)
+    total_power:
+      icon_template: mdi:power-plug
+      unit_of_measurement: "W"
+      friendly_name: "Total Electricity Power"
+      value_template: "{{ states('sensor.dryer_power') |float(default=0) + states('sensor.washer_power')|float(default=0) + states('sensor.workstations_power') | float(default=0) + states('sensor.entertainment_center_power') | float(default=0) + states('sensor.entertainment_light_power') | float(default=0) }}"
+```
 
 This is not my code. but i dont remember where i found it, so cant give credit, sorry.
