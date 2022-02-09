@@ -12,7 +12,7 @@ The sensor.yaml includes more sensors than i used, but i might use them later :-
 I do not use the sensor "Total Electricity Power", because i get the wattage directly from the main meter.
 But the "Total Electricity Power" is the total of all the powersensors, you might have in you home.
 
-```ruby
+```yaml
     # Total Energy measure which is needed for the lovelace graphs, here, you need to of course adjust to your needs (which sensors you are using, if you are using any)
     total_power:
       icon_template: mdi:power-plug
