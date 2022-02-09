@@ -1,0 +1,301 @@
+# This sensor gives you the data from the nordpool integration
+# first you need to install nordpool via hacs
+- platform: nordpool
+  VAT: True
+  currency: "DKK"
+  low_price_cutoff: 0.95
+  region: "DK1"
+  precision: 3
+  price_type: kWh
+  additional_costs: "{{0.0|float}}"
+
+- platform: template
+  sensors:
+    # This sensor assumes you are standing in front of your dryer/washer/elbil charger etc. you switch it on, have an automation that should tell you if you are good to go with the current el prices available or give you the best alternative - for this to work you need multiple "helper sensors" - them you find below
+    el_use_lowercostsuggestion:
+      icon_template: mdi:cash-multiple
+      unit_of_measurement: " "
+      friendly_name: Electricity Use Lower Cost Suggestion
+      value_template: >
+        {% set data = namespace(savedrecord=[]) %}
+        {% set counthour = namespace(value=0) %}
+        {% set el_use_time_start = (states('input_datetime.el_use_time_start') ).split(':')[0]  | int(default=0) %}
+        {% set el_use_time_end = (states('input_datetime.el_use_time_end') ).split(':')[0]  | int(default=0) %}
+        {% set el_use_hours = states('input_number.el_use_hours') | int(default=0) %}
+        {% set minpricenow = states('sensor.nordpool_min') | float(default=0) %}
+        {% set maxpricenow = states('sensor.nordpool_max') | float(default=0) %}
+        {% set avgpricenow = states('sensor.nordpool_avg') | float(default=0) %}
+        {% set limit_cheap  =  (avgpricenow - ((avgpricenow - minpricenow)/2))  %}
+        {% set limit_fair  =  avgpricenow   %}   
+        {% set limit_expensive  =  (avgpricenow + ((maxpricenow - avgpricenow)/2))  %}
+        {% for price in state_attr('sensor.nordpool_kwh_dk1_dkk_3_095_025','today') %}
+          {% if ((as_timestamp(now()) | timestamp_custom("%H", True, default = 0)) | int(default=0)) <= counthour.value %}
+            {% set data.savedrecord = data.savedrecord + [('today',counthour.value,price)] %}
+          {% endif %}
+          {% set counthour.value = counthour.value + 1 %}
+        {% endfor %}
+        {% set counthour.value = 0 %}
+        {% for price in state_attr('sensor.nordpool_kwh_dk1_dkk_3_095_025','tomorrow') %}
+          {% if price != none %}
+            {% if price > 0 %}
+              {% set data.savedrecord = data.savedrecord + [('tomorrow',counthour.value,price)] %}
+            {% endif %}
+            {% set counthour.value = counthour.value + 1 %}
+          {% endif %}                  
+        {% endfor %}                
+        {% set counter = namespace(value=0) %}
+        {% set newcounter = namespace(value=0) %}
+        {% set tempstring = namespace(savedrecord=[]) %}
+        {% set cumudata = namespace(savedrecord=[]) %}
+        {% for record in data.savedrecord %}
+          {% set counter.value = counter.value +1 %}
+          {% set tempstring.savedrecord = [record.0, record.1 ,record.2] %}
+          {% for myhour in range(0, el_use_hours-1) %}
+              {% set newcounter.value = 0 %}   
+              {% for newrecord in data.savedrecord %}
+                {% if newcounter.value == myhour+counter.value %}
+                  {% set tempstring.savedrecord = tempstring.savedrecord + [newrecord.1 , newrecord.2 ] %}
+                {% endif %}
+                {% set newcounter.value = newcounter.value +1 %}
+              {% endfor %}
+          {% endfor %}
+              {% set cumudata.savedrecord = cumudata.savedrecord + [(tempstring.savedrecord)] %}
+        {% endfor %}
+        {% set avgprice = namespace(value=0) %}
+        {% set mytimeperiod = namespace(value="") %}
+        {% set myresults = namespace(savedrecord=[]) %}
+        {% set el_price_now = namespace(value="") %}
+        {% for record in cumudata.savedrecord %}
+          {% set counter.value = 0 %}
+          {% for mydata in record %}
+            {% if loop.length / (2*el_use_hours+1) == 1  %}
+              {% set counter.value = counter.value + 1 %}
+              {% if (counter.value == 1) or (counter.value % 2 == 0) %}
+                {% set mytimeperiod.value =  mytimeperiod.value ~ "|" ~ mydata %}
+              {% else %}
+                {% set avgprice.value = avgprice.value + mydata %}    
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          {% if mytimeperiod.value != "" %}
+            {% if (mytimeperiod.value.split("|")[2] | int(default=0)) == as_timestamp(now()) | timestamp_custom('%H') | int(default=0) %}
+              {% if mytimeperiod.value.split("|")[1] == 'today' %}
+                {% set el_price_now.value = "" ~ (avgprice.value / el_use_hours) %}
+              {% endif %}
+            {% endif %}
+            {% if (mytimeperiod.value.split("|")[2] | int(default=0)) >= el_use_time_start and ((mytimeperiod.value.split("|")[-1])  | int(default=0) +1 ) <= el_use_time_end and ((mytimeperiod.value.split("|")[-1])  | int(default=0) +1 ) > el_use_hours %}
+              {% set myresults.savedrecord = myresults.savedrecord +  [(mytimeperiod.value.split("|")[1], mytimeperiod.value.split("|")[2] ~ "-" ~ ((mytimeperiod.value.split("|")[-1]) | int(default=0) + 1), avgprice.value / el_use_hours)] %}   
+            {% endif %}
+          {% endif %}
+          {% set avgprice.value = 0 %}
+          {% set mytimeperiod.value = "" %}
+        {% endfor %}
+        {% set finaldata = namespace(savedrecord=[]) %}
+        {% for record in myresults.savedrecord | sort(reverse=false, attribute='2') %}
+          {% if (el_price_now.value | float(default=0)) > (record.2 | float(default=0)) %}
+            {% if (100 - (record.2| float(default=0)*100/el_price_now.value| float(default=0) ))  > states('input_number.el_savings_threshold') | float(default=0) %}
+              {% set finaldata.savedrecord = finaldata.savedrecord + [(record.0, record.1.split("-")[0], (100 - (record.2| float(default=0)*100/el_price_now.value| float(default=0) )) | round(1))] %}
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+        {% for record in finaldata.savedrecord %}{% if loop.first %}To save at maximum {{ record.2 | round() }}% energy cost, I recommend starting your appliances {{ record.0 }} at {{ record.1 }}:00 instead.{% endif %}{% else %}I checked for you, there are no cheaper options than the current {% if (el_price_now.value | float(default=0)) < limit_cheap %}low{% elif (el_price_now.value | float(default=0)) < limit_fair %}fair{% elif (el_price_now.value | float(default=0)) < limit_expensive %}high{% else %}very high{% endif %}-priced electricity. You are good to go.{% endfor %}
+
+    # This sensor you can take to suggest you the 5 best available timeslots for your laundry/elbil etc.
+    el_use_suggestedslots:
+      icon_template: mdi:cash-multiple
+      unit_of_measurement: " "
+      friendly_name: Electricity Suggested Slots
+      value_template: >
+        {% set data = namespace(savedrecord=[]) %}
+        {% set counthour = namespace(value=0) %}
+        {% set el_use_time_start = (states('input_datetime.el_use_time_start') ).split(':')[0]  | int(default=0) %}
+        {% set el_use_time_end = (states('input_datetime.el_use_time_end') ).split(':')[0]  | int(default=0) %}
+        {% set el_use_hours = states('input_number.el_use_hours') | int(default=0) %}
+        {% set minprice = states('sensor.nordpool_min') | float(default=0) %}
+        {% set maxprice = states('sensor.nordpool_max') | float(default=0) %}
+        {% set avgprice = states('sensor.nordpool_avg') | float(default=0) %}
+        {% set limit_cheap  =  (avgprice - ((avgprice - minprice)/2))  %}
+        {% set limit_fair  =  avgprice   %}   
+        {% set limit_expensive  =  (avgprice + ((maxprice - avgprice)/2))  %}
+        {% for price in state_attr('sensor.nordpool_kwh_dk1_dkk_3_095_025','today') %}
+          {% if ((as_timestamp(now()) | timestamp_custom("%H", True, default = 0)) | int(default=0)) <= counthour.value %}
+            {% set data.savedrecord = data.savedrecord + [('today',counthour.value,price)] %}
+          {% endif %}
+          {% set counthour.value = counthour.value + 1 %}
+        {% endfor %}
+        {% set counthour.value = 0 %}
+        {% for price in state_attr('sensor.nordpool_kwh_dk1_dkk_3_095_025','tomorrow') %}
+          {% if price != none %}
+            {% if price > 0 %}
+              {% set data.savedrecord = data.savedrecord + [('tomorrow',counthour.value,price)] %}
+            {% endif %}
+            {% set counthour.value = counthour.value + 1 %}
+          {% endif %}                  
+        {% endfor %}                
+        {% set counter = namespace(value=0) %}
+        {% set newcounter = namespace(value=0) %}
+        {% set tempstring = namespace(savedrecord=[]) %}
+        {% set cumudata = namespace(savedrecord=[]) %}
+        {% for record in data.savedrecord %}
+          {% set counter.value = counter.value +1 %}
+          {% set tempstring.savedrecord = [record.0, record.1 ,record.2] %}
+          {% for myhour in range(0, el_use_hours-1) %}
+              {% set newcounter.value = 0 %}   
+              {% for newrecord in data.savedrecord %}
+                {% if newcounter.value == myhour+counter.value %}
+                  {% set tempstring.savedrecord = tempstring.savedrecord + [newrecord.1 , newrecord.2 ] %}
+                {% endif %}
+                {% set newcounter.value = newcounter.value +1 %}
+              {% endfor %}
+          {% endfor %}
+              {% set cumudata.savedrecord = cumudata.savedrecord + [(tempstring.savedrecord)] %}
+        {% endfor %}
+        {% set avgprice = namespace(value=0) %}
+        {% set mytimeperiod = namespace(value="") %}
+        {% set myresults = namespace(savedrecord=[]) %}
+        {% for record in cumudata.savedrecord %}
+          {% set counter.value = 0 %}
+          {% for mydata in record %}
+            {% if loop.length / (2*el_use_hours+1) == 1  %}
+              {% set counter.value = counter.value + 1 %}
+              {% if (counter.value == 1) or (counter.value % 2 == 0) %}
+                {% set mytimeperiod.value =  mytimeperiod.value ~ "|" ~ mydata %}
+              {% else %}
+                {% set avgprice.value = avgprice.value + mydata %}    
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          {% if mytimeperiod.value != "" %}
+            {% if (mytimeperiod.value.split("|")[2] | int(default=0)) >= el_use_time_start and ((mytimeperiod.value.split("|")[-1])  | int(default=0) +1 ) <= el_use_time_end and ((mytimeperiod.value.split("|")[-1])  | int(default=0) +1 ) > el_use_hours %}
+              {% set myresults.savedrecord = myresults.savedrecord +  [(mytimeperiod.value.split("|")[1], mytimeperiod.value.split("|")[2] ~ "-" ~ ((mytimeperiod.value.split("|")[-1]) | int(default=0) + 1), avgprice.value / el_use_hours)] %}   
+            {% endif %}
+          {% endif %}
+          {% set avgprice.value = 0 %}
+          {% set mytimeperiod.value = "" %}
+        {% endfor %}
+        {% set finaldata = namespace(savedrecord=[]) %}
+        {% for record in myresults.savedrecord | sort(reverse=false, attribute='2') %}
+            {% if (record.2 | float(default=0)) < limit_cheap %}
+              {% set finaldata.savedrecord = finaldata.savedrecord + [(record.0, record.1.split("-")[0], record.2, 'cheap')] %}
+            {% elif (record.2 | float(default=0)) < limit_fair %}
+              {% set finaldata.savedrecord = finaldata.savedrecord + [(record.0, record.1.split("-")[0], record.2, 'fair')] %}
+            {% elif (record.2 | float(default=0)) < limit_expensive %}
+              {% set finaldata.savedrecord = finaldata.savedrecord + [(record.0, record.1.split("-")[0], record.2, 'expensive')] %}
+            {% else %}
+              {% set finaldata.savedrecord = finaldata.savedrecord + [(record.0, record.1.split("-")[0], record.2, 'very expensive')] %}
+            {% endif %}
+        {% endfor %}
+        {% for record in (finaldata.savedrecord | sort(reverse=false, attribute='2'))[:5] %}
+        {{ record.0 }} at {{ record.1 }}:00 {{ record.3 }}<br>{% endfor %}
+
+    # Total Energy measure which is needed for the lovelace graphs, here, you need to of course adjust to your needs (which sensors you are using, if you are using any)
+    total_power:
+      icon_template: mdi:power-plug
+      unit_of_measurement: "W"
+      friendly_name: "Total Electricity Power"
+      value_template: "{{ states('sensor.dryer_power') |float(default=0) + states('sensor.washer_power')|float(default=0) + states('sensor.workstations_power') | float(default=0) + states('sensor.entertainment_center_power') | float(default=0) + states('sensor.entertainment_light_power') | float(default=0) }}"
+
+    # the nordpool min value from the integration is flawed (the attribute), it calculates only the minimum value of today's available timeslots, not tomorrow's and filters not things out that are in the past - thus, I needed to rewrite the min value sensor
+    nordpool_min:
+      icon_template: mdi:cash-multiple
+      unit_of_measurement: "DKK/kWh"
+      friendly_name: Nordpool Minimum Price
+      value_template: >
+        {% set data = namespace(savedrecord=[]) %}
+        {% set counthour = namespace(value=0) %}
+        {% for price in state_attr('sensor.nordpool_kwh_dk1_dkk_3_095_025','today') %}
+          {% if ((as_timestamp(now()) | timestamp_custom("%H", True, default = 0)) | int(default=0)) <= counthour.value %}
+              {% set data.savedrecord = data.savedrecord + [('today',counthour.value,price)] %}
+          {% endif %}
+          {% set counthour.value = counthour.value + 1 %}
+        {% endfor %}
+        {% set counthour.value = 0 %}
+        {% for price in state_attr('sensor.nordpool_kwh_dk1_dkk_3_095_025','tomorrow') %}
+          {% if price != none %}
+              {% if price > 0 %}
+                  {% set data.savedrecord = data.savedrecord + [('tomorrow',counthour.value,price)] %}
+              {% endif %}
+              {% set counthour.value = counthour.value + 1 %}
+          {% endif %}                  
+        {% endfor %}
+        {% for record in data.savedrecord | sort(reverse=false, attribute='2') %}
+        {% if loop.first %}{{ record.2 }}{% endif %}
+        {% endfor %}
+
+    # same applies for the max value
+    nordpool_max:
+      icon_template: mdi:cash-multiple
+      unit_of_measurement: "DKK/kWh"
+      friendly_name: Nordpool Maximum Price
+      value_template: >
+        {% set data = namespace(savedrecord=[]) %}
+        {% set counthour = namespace(value=0) %}
+        {% for price in state_attr('sensor.nordpool_kwh_dk1_dkk_3_095_025','today') %}
+          {% if ((as_timestamp(now()) | timestamp_custom("%H", True, default = 0)) | int(default=0)) <= counthour.value %}
+              {% set data.savedrecord = data.savedrecord + [('today',counthour.value,price)] %}
+          {% endif %}
+          {% set counthour.value = counthour.value + 1 %}
+        {% endfor %}
+        {% set counthour.value = 0 %}
+        {% for price in state_attr('sensor.nordpool_kwh_dk1_dkk_3_095_025','tomorrow') %}
+          {% if price != none %}
+              {% if price > 0 %}
+                  {% set data.savedrecord = data.savedrecord + [('tomorrow',counthour.value,price)] %}
+              {% endif %}
+              {% set counthour.value = counthour.value + 1 %}
+          {% endif %}
+        {% endfor %}
+        {% for record in data.savedrecord | sort(reverse=true, attribute='2') %}
+        {% if loop.first %}{{ record.2 }}{% endif %}
+        {% endfor %}
+
+    # ...and the average value :)
+    nordpool_avg:
+      icon_template: mdi:cash-multiple
+      unit_of_measurement: "DKK/kWh"
+      friendly_name: Nordpool Average Price
+      value_template: >
+        {% set data = namespace(savedrecord=[]) %}
+        {% set counthour = namespace(value=0) %}
+        {% set average = namespace(value=0) %}
+        {% for price in state_attr('sensor.nordpool_kwh_dk1_dkk_3_095_025','today') %}
+          {% if ((as_timestamp(now()) | timestamp_custom("%H", True, default = 0)) | int(default=0)) <= counthour.value %}
+              {% set data.savedrecord = data.savedrecord + [('today',counthour.value,price)] %}
+          {% endif %}
+          {% set counthour.value = counthour.value + 1 %}
+        {% endfor %}
+        {% set counthour.value = 0 %}
+        {% for price in state_attr('sensor.nordpool_kwh_dk1_dkk_3_095_025','tomorrow') %}
+          {% if price != none %}
+              {% if price > 0 %}
+                  {% set data.savedrecord = data.savedrecord + [('tomorrow',counthour.value,price)] %}
+              {% endif %}
+              {% set counthour.value = counthour.value + 1 %}
+          {% endif %}
+        {% endfor %}
+        {% set counthour.value = 1 %}
+        {% for record in data.savedrecord | sort(reverse=true, attribute='2') %}
+        {% set average.value = average.value + record.2 %}
+        {% set counthour.value = counthour.value + 1 %}
+        {% endfor %}
+        {{ average.value / (counthour.value-1) }}
+
+    # this is just a little gimmick, if you want to use a gauge in your lovelace, this translates the stuff of cheap, fair, expensive, very expensive into numbers/points
+    nordpool_current_eval:
+      icon_template: mdi:cash-multiple
+      unit_of_measurement: "points"
+      friendly_name: Nordpool Current Price Score
+      value_template: >
+        {% set min = states('sensor.nordpool_min') | float(default=0) %}
+        {% set max = states('sensor.nordpool_max') | float(default=0) %}
+        {% set avg = states('sensor.nordpool_avg') | float(default=0) %}
+        {% set toeval = states('sensor.nordpool_kwh_dk1_dkk_3_095_025') | float(default=0) %}
+        {% if toeval < avg - ((avg-min) / 2) %}
+            1
+        {% elif toeval < avg %}
+            2
+        {% elif toeval < avg + (max-avg) / 2 %}
+            3
+        {% elif toeval >= avg + (max-avg) / 2 %}
+            4
+        {% endif %}
