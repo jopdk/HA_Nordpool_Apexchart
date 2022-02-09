@@ -20,5 +20,7 @@ But the "Total Electricity Power" is the total of all the powersensors, you migh
       friendly_name: "Total Electricity Power"
       value_template: "{{ states('sensor.dryer_power') |float(default=0) + states('sensor.washer_power')|float(default=0) + states('sensor.workstations_power') | float(default=0) + states('sensor.entertainment_center_power') | float(default=0) + states('sensor.entertainment_light_power') | float(default=0) }}"
 ```
+The values in the above picture is derived from this graph/these values:
+![image](https://user-images.githubusercontent.com/59705799/153184421-ca57d798-1261-4d4b-8890-30f7df8d2df2.png)
 
 This is not my code. but i dont remember where i found it, so cant give credit, sorry.
