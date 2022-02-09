@@ -1,0 +1,57 @@
+type: custom:config-template-card
+entities:
+  - sensor.nordpool_kwh_dk1_dkk_3_095_025
+card:
+  type: custom:apexcharts-card
+  graph_span: 3d
+  experimental:
+    color_threshold: true
+  header:
+    title: El Pris vs. samlet forbrug - sidste 3 dage
+    show: true
+  hours_12: false
+  yaxis:
+    - id: first
+      decimals: 1
+      apex_config:
+        tickAmount: 4
+    - id: second
+      opposite: true
+      decimals: 3
+      apex_config:
+        tickAmount: 4
+  series:
+    - entity: sensor.sm_activepower
+      yaxis_id: first
+      name: Forbrug
+      stroke_width: 2
+      color: var(--app-header-text-color)
+      show:
+        legend_value: false
+      group_by:
+        duration: 1h
+        func: avg
+    - entity: sensor.nordpool_kwh_dk1_dkk_3_095_025
+      type: column
+      yaxis_id: second
+      name: Pris
+      show:
+        legend_value: false
+      group_by:
+        duration: 1h
+        func: last
+      color_threshold:
+        - value: 0
+          color: green
+        - value: >-
+            ${ Number(states['sensor.nordpool_avg'].state) -
+            (Number(states['sensor.nordpool_avg'].state)-Number(states['sensor.nordpool_min'].state))
+            * 0.5 }
+          color: orange
+        - value: ${ Number(states['sensor.nordpool_avg'].state)  }
+          color: red
+        - value: >-
+            ${ Number(states['sensor.nordpool_avg'].state) +
+            (Number(states['sensor.nordpool_max'].state)-Number(states['sensor.nordpool_avg'].state))
+            * 0.5 }
+          color: darkred
